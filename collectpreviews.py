@@ -2,8 +2,10 @@ import argparse
 # import logging
 import logging.config
 import os
+import threading
 import time
 import urllib.request
+from multiprocessing.pool import ThreadPool
 from sys import argv
 from urllib.error import HTTPError, URLError
 
@@ -32,7 +34,7 @@ LOG_CONFIG = {
         }
     },
     'loggers': {
-        'deblogger': {'handlers': ['consoleDebugHandler'], 'level': 'DEBUG'},
+        'deblogger': {'handlers': ['fileDebugHandler'], 'level': 'DEBUG'},
         'exceptLogger': {'handlers': ['exceptHandler'], 'level': 'ERROR'}
     },
     'formatters': {
@@ -45,6 +47,16 @@ LOG_CONFIG = {
 logging.config.dictConfig(LOG_CONFIG)
 d_log = logging.getLogger('deblogger')
 ex_log = logging.getLogger('exceptLogger')
+
+lock_err = threading.Lock()
+lock_byte_counter = threading.Lock()
+
+count_downloaded = 0
+total_bytes = 0
+count_created_file = 0
+errors = 0
+thumb_size = None
+output_dir = ''
 
 
 def parse_arguments():
@@ -92,19 +104,59 @@ def make_thumbnail(image_raw, size):
         return image.convert(mode='RGB')
 
 
+def handle_one_url(index, url):
+    global count_downloaded
+    global total_bytes
+    global errors
+    global output_dir
+    global thumb_size
+
+    d_log.debug(f'\nWorking on: {url}')
+    image_raw = download_image(url)
+    if not image_raw:
+        d_log.debug(f'Can\'t download image from {url}\n')
+        with lock_err:
+            errors += 1
+        return None
+    with lock_byte_counter:
+        count_downloaded += 1
+        total_bytes += int(image_raw.info()['Content-Length'])
+    thumbnail = make_thumbnail(image_raw, thumb_size)
+    if not thumbnail:
+        d_log.debug(f'Can\'t make thumbnail from {url}\n')
+        with lock_err:
+            errors += 1
+        return None
+
+    new_name = f'{index:05d}.jpeg'
+    full_path = os.path.join(output_dir, new_name)
+    # print(full_path)
+    try:
+        thumbnail.save(full_path, 'jpeg')
+    except (KeyError, IOError):
+        ex_log.exception(f'Can\'t save thumbnail file from {url}')
+        with lock_err:
+            errors += 1
+    else:
+        print(f'Created {new_name} from {url}')
+
+
 def main():
+    global output_dir
+    global thumb_size
+
     if len(argv) == 1:
         print('The file of urls is required. Run "collectpreviews.py --help"')
         return
 
     start_time = time.time()
-    d_log.debug(f'\nProgram started at {time.ctime(start_time)}')
+    d_log.debug(f'\nFull-work in one Pool program started at {time.ctime(start_time)}')
 
     args = parse_arguments()
     source_file = args.file
-    # threads = args.threads
+    threads = args.threads
     try:
-        size = tuple(int(x) for x in args.size.split('x'))
+        thumb_size = tuple(int(x) for x in args.size.split('x'))
     except ValueError:
         print('Size must be in format "<width>x<height>".')
         return
@@ -120,45 +172,22 @@ def main():
 
     with open(source_file, 'r') as f:
         urls = [x.strip('\n') for x in f.readlines()]
+    # urls = [(i, url) for i, url in enumerate(urls)]
     # pp(urls)
 
     total_urls = len(urls)
-    total_bytes = 0
-    count_created_file = 0
-    errors = 0
-    for i, url in enumerate(urls):
-        d_log.debug(f'\nWorking on: {url}')
-        image_raw = download_image(url)
-        if not image_raw:
-            d_log.debug(f'Can\'t download image from {url}\n')
-            errors += 1
-            continue
-        total_bytes += int(image_raw.info()['Content-Length'])
-        thumbnail = make_thumbnail(image_raw, size)
-        if not thumbnail:
-            d_log.debug(f'Can\'t make thumbnail from {url}\n')
-            errors += 1
-            continue
 
-        new_name = f'{i:05d}.jpeg'
-        full_path = os.path.join(output_dir, new_name)
-        # print(full_path)
-        try:
-            thumbnail.save(full_path, 'jpeg')
-        except (KeyError, IOError):
-            ex_log.exception(f'Can\'t save thumbnail file from {url}')
-            errors += 1
-        else:
-            print(f'Created {new_name} from {url}')
-            count_created_file += 1
+    pool = ThreadPool(threads)
+    pool.starmap(handle_one_url, [(i, url) for i, url in enumerate(urls)])
 
     finish_time = time.time()
-    print(f'From {total_urls} urls created {count_created_file} files.\n',
+    print(f'\nFrom {total_urls} urls dowmloaded {count_downloaded} files',
+          f'Created {count_created_file} files.\n',
           f'Downloaded {total_bytes} bytes.\n',
           f'{errors} {"error" if errors == 1 else "errors"} occured.\n',
-          f'Working time: {finish_time - start_time} s.')
+          f'Working time: {finish_time - start_time:.2f} s.')
 
-    d_log.debug(f'\nProgram finished at {time.ctime(finish_time)}\n')
+    d_log.debug(f'\nWorking time: {finish_time - start_time:.2f} s.\n')
 
 
 if __name__ == '__main__':
