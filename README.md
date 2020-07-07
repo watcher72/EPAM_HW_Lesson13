@@ -1,0 +1,1 @@
+#### Homework to the lesson 13 "Parallel programming" (course Python $ BigData)
