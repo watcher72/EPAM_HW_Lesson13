@@ -1,3 +1,7 @@
+"""
+Collect the thumbnails of the images from the urls given in the file
+(one url per row).
+"""
 import argparse
 import logging.config
 import os
@@ -7,6 +11,7 @@ import queue
 import urllib.request
 from multiprocessing.pool import ThreadPool
 from sys import argv
+from typing import Tuple
 from urllib.error import HTTPError, URLError
 
 from PIL import Image
@@ -79,7 +84,14 @@ def parse_arguments():
     return args
 
 
-def download_image(index, url):
+def download_image(index: int, url: str) -> None:
+    """
+    Download the image from given url.
+
+    :param index: the order number of url in given file
+    :param url: url for download the inage
+    :return: tuple with order number of url and raw data of image
+    """
     global count_downloaded
     global total_bytes
     global errors
@@ -103,7 +115,14 @@ def download_image(index, url):
     q.put((index, response))
 
 
-def make_thumbnail(image_raw, size):
+def make_thumbnail(image_raw, size: Tuple[int, int]):
+    """
+    Create a thumbnail of given raw data of image.
+
+    :param image_raw: raw data of image
+    :param size: thumbnail's size
+    :return: thumbnail's Pillow object
+    """
     try:
         image = Image.open(image_raw)
     except IOError:
@@ -116,7 +135,14 @@ def make_thumbnail(image_raw, size):
     return image.convert(mode='RGB')
 
 
-def save_thumbnail(output_dir, size):
+def save_thumbnail(output_dir, size) -> None:
+    """
+    Save thumbnail of the image on the given directory.
+
+    :param output_dir: directory in which must be saved the thumbnail
+    :param size: thumbnail's size
+    :return: None
+    """
     global errors
     global count_created_file
 
@@ -129,7 +155,7 @@ def save_thumbnail(output_dir, size):
             d_log.debug(f'Can\'t make thumbnail {index}\n')
             with lock_err:
                 errors += 1
-            return None
+            return
 
         new_name = f'{index:05d}.jpeg'
         full_path = os.path.join(output_dir, new_name)
