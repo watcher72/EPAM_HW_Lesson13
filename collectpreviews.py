@@ -10,7 +10,6 @@ import time
 import queue
 import urllib.request
 from multiprocessing.pool import ThreadPool
-from sys import argv
 from typing import Tuple
 from urllib.error import HTTPError, URLError
 
@@ -72,7 +71,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description='Save the thumbnails of the images from urls'
     )
-    parser.add_argument('file', type=str, help='File with urls')
+    parser.add_argument('file', type=str, nargs='?', default=None,
+                        help='File with urls')
     parser.add_argument('--dir', '-d', type=str, default='',
                         help='Output directory')
     parser.add_argument('--threads', '-t', type=int, default=1,
@@ -174,15 +174,12 @@ def save_thumbnail(output_dir, size) -> None:
 
 
 def main():
-    if len(argv) == 1:
+    # Parse arguments
+    args = parse_arguments()
+    if not args.file:
         print('The file of urls is required. Run "collectpreviews.py --help"')
         return
 
-    start_time = time.time()
-    d_log.debug(f'\nFull-work in one Pool program started at {time.ctime(start_time)}')
-
-    # Parse arguments
-    args = parse_arguments()
     source_file = args.file
     threads = args.threads
     try:
@@ -197,8 +194,11 @@ def main():
         try:
             os.mkdir(output_dir)
         except OSError:
-            ex_log.exception(f'\nCan\'t create output directory {output_dir}')
+            print(f'Can\'t create output directory {output_dir}')
             return
+
+    start_time = time.time()
+    d_log.debug(f'\nFull-work in one Pool program started at {time.ctime(start_time)}')
 
     # Read urls from file
     with open(source_file, 'r') as f:
@@ -211,8 +211,7 @@ def main():
     pool_download = ThreadPool(threads)
     pool_save = ThreadPool(threads)
 
-    pool_download.starmap(download_image,
-                          [(i, url) for i, url in enumerate(urls)])
+    pool_download.starmap(download_image, enumerate(urls))
     # threading.Thread(target=save_thumbnail, args=(output_dir, thumb_size))
     pool_save.apply(save_thumbnail, (output_dir, thumb_size))
 
